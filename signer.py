@@ -5,6 +5,7 @@ from os import path
 import authres.arc
 import authres.dmarc
 from authheaders import sign_message
+from flanker import mime
 import logging
 
 UTF8_ENCODING = 'utf-8'
@@ -22,9 +23,12 @@ parser.add_argument('--headers', action="store",
 parser.add_argument('--verbose', '-v', action="store_true", default=False, help="enable verbose logging")
 
 
-def get_authres_header(srvid):
+def get_authres_header(srvid, arc_headers_present):
     spf_pass = authres.SPFAuthenticationResult(result='pass')
-    arc_pass = authres.arc.ARCAuthenticationResult(result='pass')
+    if arc_headers_present:
+        arc_pass = authres.arc.ARCAuthenticationResult(result='pass')
+    else:
+        arc_pass = authres.arc.ARCAuthenticationResult(result='none')
     dkim_pass = authres.DKIMAuthenticationResult(result='pass')
     dmarc_pass = authres.dmarc.DMARCAuthenticationResult(result='pass')
 
@@ -51,15 +55,21 @@ if __name__ == "__main__":
     message = bytes(open(args.messagefile, 'rb').read())
     private_key = bytes(open(args.privatekeyfile, 'rb').read())
 
-    message_with_authres = bytes(get_authres_header(args.srvid), encoding=UTF8_ENCODING) + message
+    arc_headers_present = False
+    mime = mime.from_string(message)
+    if len(mime.headers.getall('ARC-Seal')) > 0:
+        arc_headers_present = True
+
+    authres_header = get_authres_header(args.srvid, arc_headers_present)
+    message_with_authres = bytes(authres_header, encoding=UTF8_ENCODING) + message
     logging.debug("Message with authres: %s", message_with_authres)
     signature = sign_message(message_with_authres,
-                       args.selector,
-                       args.domain,
-                       private_key,
-                       args.headers.split(b':'),
-                       'ARC',
-                       bytes(args.srvid, encoding=UTF8_ENCODING))
+                             args.selector,
+                             args.domain,
+                             private_key,
+                             args.headers.split(b':'),
+                             'ARC',
+                             bytes(args.srvid, encoding=UTF8_ENCODING))
     if len(signature) == 0:
         sys.exit("Unable to generate arc headers")
     separator = "#####"
@@ -69,5 +79,6 @@ if __name__ == "__main__":
                                                               "ARC-Message-Signature" + separator)
     signature[2] = signature[2].decode(UTF8_ENCODING).replace("ARC-Authentication-Results: ",
                                                               "ARC-Authentication-Results" + separator)
+    signature.append(authres_header.replace("Authentication-Results: ", "Authentication-Results" + separator))
     for sig in signature:
         print(bytes(sig, encoding=UTF8_ENCODING))

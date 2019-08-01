@@ -4,6 +4,7 @@ Repository for ARC signing in Python with virtualenv.
 
 #### Setup
 ```
+pip install --upgrade setuptools # upgrade setuptools
 pip install -r requirements.txt
 ```
 
